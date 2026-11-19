@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Training artifacts
+runs/
+wandb/
+swanlab/
+*.pt
+*.pth
+
+# Misc
+.DS_Store
+.idea/
+.vscode/

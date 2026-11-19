@@ -150,21 +150,25 @@ if __name__ == "__main__":
     # training env setup
     envs = SyncVectorEnv([make_env(args.env_id, args.seed + i) for i in range(args.num_envs)])
     # evaluation env setup: 1.) from a fix dataset, or 2.) generated with seed
+    # NOTE(local smoke): use generated eval instances to avoid the hardcoded
+    # Linux dataset path in envs/tsp_data.py / envs/vrp_data.py.
+    # For real benchmarking, switch back to option 1 after downloading the
+    # attention-learn-to-route datasets and fixing root_dir in envs/*_data.py.
    # 1.) use test instance from a fix dataset
-    test_envs = SyncVectorEnv(
-        [
-            make_env(
-                args.env_id,
-                args.seed + i,
-                cfg={"eval_data": True, "eval_partition": "eval", "eval_data_idx": i},
-            )
-            for i in range(args.n_test)
-        ]
-    )
-#     # 2.) use generated evaluation instance instead
-#     import logging
-#     logging.warning('Using generated evaluation instance. For benchmarking, please download the fix dataset.')
-#     test_envs = SyncVectorEnv([make_env(args.env_id, args.seed + args.num_envs + i) for i in range(args.n_test)])
+#    test_envs = SyncVectorEnv(
+#        [
+#            make_env(
+#                args.env_id,
+#                args.seed + i,
+#                cfg={"eval_data": True, "eval_partition": "eval", "eval_data_idx": i},
+#            )
+#            for i in range(args.n_test)
+#        ]
+#    )
+    # 2.) use generated evaluation instance instead
+    import logging
+    logging.warning('Using generated evaluation instance. For benchmarking, please download the fix dataset.')
+    test_envs = SyncVectorEnv([make_env(args.env_id, args.seed + args.num_envs + i) for i in range(args.n_test)])
     
     assert isinstance(
         envs.single_action_space, gym.spaces.MultiDiscrete
@@ -211,6 +215,7 @@ if __name__ == "__main__":
         encoder_state = agent.backbone.encode(next_obs)
         next_done = torch.zeros(args.num_envs, args.n_traj).to(device)
         r = []
+        #PPO sampling
         for step in range(0, args.num_steps):
             global_step += 1 * args.num_envs
             obs[step] = next_obs
@@ -246,7 +251,7 @@ if __name__ == "__main__":
         writer.add_scalar("charts/episodic_return_mean", avg_episodic_return, global_step)
         writer.add_scalar("charts/episodic_return_max", max_episodic_return, global_step)
         writer.add_scalar("charts/episodic_length", avg_episodic_length, global_step)
-        # bootstrap value if not done
+        # bootstrap value if not done：PPO算A,TD target=return
         with torch.no_grad():
             next_value = agent.get_value_cached(next_obs, encoder_state).squeeze(-1)  # B x T
             advantages = torch.zeros_like(rewards).to(device)  # steps x B x T
@@ -283,6 +288,7 @@ if __name__ == "__main__":
         flatinds = np.arange(args.batch_size).reshape(args.num_steps, args.num_envs)
 
         clipfracs = []
+        #RL PPO训练
         for epoch in range(args.update_epochs):
             np.random.shuffle(envinds)
             for start in range(0, args.num_envs, envsperbatch):
