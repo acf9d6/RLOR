@@ -145,7 +145,10 @@ if __name__ == "__main__":
     def log_scalar(name, value, step):
         writer.add_scalar(name, value, step)
         if args.track:
-            swanlab.log({name: value})
+            # pass global_step explicitly so all swanlab curves share the same
+            # x-axis (= global_step); otherwise swanlab auto-increments its own
+            # internal step on every log() call and the axes get misaligned.
+            swanlab.log({name: value}, step=int(step))
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s"
@@ -419,6 +422,22 @@ if __name__ == "__main__":
             log_scalar("test/episodic_return_mean", avg_episodic_return, global_step)
             log_scalar("test/episodic_return_max", max_episodic_return, global_step)
             log_scalar("test/episodic_length", avg_episodic_length, global_step)
+
+    total_time = time.time() - start_time
+    avg_per_update = total_time / num_updates if num_updates else float("nan")
+    print(
+        f"[DONE] total_time={total_time:.1f}s ({total_time/60:.1f}min), "
+        f"updates={num_updates}, avg_per_update={avg_per_update:.2f}s, "
+        f"final_SPS={int(global_step / total_time)}"
+    )
+    if args.track:
+        swanlab.log(
+            {
+                "summary/total_time_s": total_time,
+                "summary/avg_per_update_s": avg_per_update,
+            },
+            step=int(global_step),
+        )
 
     envs.close()
     writer.close()
