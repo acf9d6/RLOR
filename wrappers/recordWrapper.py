@@ -1,13 +1,21 @@
 import time
 from collections import deque
 
-import gym
 import numpy as np
 
 
-class RecordEpisodeStatistics(gym.Wrapper):
+class RecordEpisodeStatistics:
+    """Record episodic return/length for the (custom 4-tuple) RLOR envs.
+
+    Self-contained wrapper: it does NOT inherit gymnasium.Wrapper, because the
+    gymnasium base class changed its step/reset contract and attribute
+    forwarding. Here we hold the wrapped env explicitly and forward unknown
+    attributes via __getattr__, keeping the original 4-tuple (obs, reward,
+    done, info) behaviour unchanged.
+    """
+
     def __init__(self, env, deque_size=100):
-        super().__init__(env)
+        self.env = env
         self.num_envs = getattr(env, "num_envs", 1)
         self.n_traj = env.n_traj
         self.t0 = time.perf_counter()
@@ -18,15 +26,20 @@ class RecordEpisodeStatistics(gym.Wrapper):
         self.length_queue = deque(maxlen=deque_size)
         self.is_vector_env = getattr(env, "is_vector_env", False)
 
+    def __getattr__(self, name):
+        # Forward any attribute we don't define (observation_space,
+        # action_space, metadata, seed, ...) to the wrapped env.
+        return getattr(self.env, name)
+
     def reset(self, **kwargs):
-        observations = super().reset(**kwargs)
+        observations = self.env.reset(**kwargs)
         self.episode_returns = np.zeros((self.num_envs, self.n_traj), dtype=np.float32)
         self.episode_lengths = np.zeros(self.num_envs, dtype=np.int32)
         self.finished = [False] * self.num_envs
         return observations
 
     def step(self, action):
-        observations, rewards, dones, infos = super().step(action)
+        observations, rewards, dones, infos = self.env.step(action)
         self.episode_returns += rewards
         self.episode_lengths += 1
         if not self.is_vector_env:

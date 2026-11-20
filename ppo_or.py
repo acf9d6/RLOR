@@ -5,9 +5,18 @@ import os
 import random
 import shutil
 import time
-from distutils.util import strtobool
 
-import gym
+import gymnasium as gym
+
+
+# distutils was removed in Python 3.12; inline a minimal strtobool replacement.
+def strtobool(val):
+    val = str(val).lower()
+    if val in ("y", "yes", "t", "true", "on", "1"):
+        return 1
+    if val in ("n", "no", "f", "false", "off", "0"):
+        return 0
+    raise ValueError(f"invalid truth value {val!r}")
 import numpy as np
 import torch
 import torch.nn as nn
@@ -90,9 +99,24 @@ def parse_args():
 from wrappers.recordWrapper import RecordEpisodeStatistics
 
 
-def make_env(env_id, seed, cfg={}):
+import importlib
+
+
+def _load_env_class(entry_point):
+    # entry_point looks like "envs.cvrp_vector_env:CVRPVectorEnv"
+    module_path, class_name = entry_point.split(":")
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
+
+
+def make_env(entry_point, seed, cfg={}):
     def thunk():
-        env = gym.make(env_id, **cfg)
+        # Instantiate the custom RLOR env directly instead of gym.make(), to
+        # avoid gymnasium's auto-wrappers (OrderEnforcing/PassiveEnvChecker/
+        # TimeLimit) which assume the standard 5-tuple step API. RLOR envs use a
+        # custom 4-tuple (obs, reward, done, info) contract.
+        EnvClass = _load_env_class(entry_point)
+        env = EnvClass(**cfg)
         env = RecordEpisodeStatistics(env)
         env.seed(seed)
         env.action_space.seed(seed)
@@ -141,13 +165,11 @@ if __name__ == "__main__":
     #### Env defintion ####
     #######################
 
-    gym.envs.register(
-        id=args.env_id,
-        entry_point=args.env_entry_point,
-    )
+    # No gym registration needed: make_env instantiates the env class directly
+    # from args.env_entry_point (e.g. "envs.cvrp_vector_env:CVRPVectorEnv").
 
     # training env setup
-    envs = SyncVectorEnv([make_env(args.env_id, args.seed + i) for i in range(args.num_envs)])
+    envs = SyncVectorEnv([make_env(args.env_entry_point, args.seed + i) for i in range(args.num_envs)])
     # evaluation env setup: 1.) from a fix dataset, or 2.) generated with seed
     # NOTE(local smoke): use generated eval instances to avoid the hardcoded
     # Linux dataset path in envs/tsp_data.py / envs/vrp_data.py.
@@ -167,7 +189,7 @@ if __name__ == "__main__":
     # 2.) use generated evaluation instance instead
     import logging
     logging.warning('Using generated evaluation instance. For benchmarking, please download the fix dataset.')
-    test_envs = SyncVectorEnv([make_env(args.env_id, args.seed + args.num_envs + i) for i in range(args.n_test)])
+    test_envs = SyncVectorEnv([make_env(args.env_entry_point, args.seed + args.num_envs + i) for i in range(args.n_test)])
     
     assert isinstance(
         envs.single_action_space, gym.spaces.MultiDiscrete
