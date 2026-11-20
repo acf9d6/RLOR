@@ -27,11 +27,9 @@ def parse_args():
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
-        help="if toggled, this experiment will be tracked with Weights and Biases")
-    parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
-        help="the wandb's project name")
-    parser.add_argument("--wandb-entity", type=str, default=None,
-        help="the entity (team) of wandb's project")
+        help="if toggled, this experiment will be tracked with SwanLab")
+    parser.add_argument("--project-name", type=str, default="RLOR",
+        help="the experiment tracking project name (swanlab)")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
 
@@ -111,18 +109,19 @@ if __name__ == "__main__":
     args = parse_args()
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
-        import wandb
+        import swanlab
 
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
+        swanlab.init(
+            project=args.project_name,
+            experiment_name=run_name,
             config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
         )
     writer = SummaryWriter(f"runs/{run_name}")
+
+    def log_scalar(name, value, step):
+        writer.add_scalar(name, value, step)
+        if args.track:
+            swanlab.log({name: value})
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s"
@@ -248,9 +247,9 @@ if __name__ == "__main__":
             max_episodic_return={max_episodic_return}\n \
             avg_episodic_length={avg_episodic_length}"
         )
-        writer.add_scalar("charts/episodic_return_mean", avg_episodic_return, global_step)
-        writer.add_scalar("charts/episodic_return_max", max_episodic_return, global_step)
-        writer.add_scalar("charts/episodic_length", avg_episodic_length, global_step)
+        log_scalar("charts/episodic_return_mean", avg_episodic_return, global_step)
+        log_scalar("charts/episodic_return_max", max_episodic_return, global_step)
+        log_scalar("charts/episodic_length", avg_episodic_length, global_step)
         # bootstrap value if not done：PPO算A,TD target=return
         with torch.no_grad():
             next_value = agent.get_value_cached(next_obs, encoder_state).squeeze(-1)  # B x T
@@ -358,16 +357,16 @@ if __name__ == "__main__":
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-        writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-        writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        log_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+        log_scalar("losses/value_loss", v_loss.item(), global_step)
+        log_scalar("losses/policy_loss", pg_loss.item(), global_step)
+        log_scalar("losses/entropy", entropy_loss.item(), global_step)
+        log_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
+        log_scalar("losses/approx_kl", approx_kl.item(), global_step)
+        log_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+        log_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
-        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        log_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         if update % 1000 == 0 or update == num_updates:
             torch.save(agent.state_dict(), f"runs/{run_name}/ckpt/{update}.pt")
         if update % 100 == 0 or update == num_updates:
@@ -395,9 +394,9 @@ if __name__ == "__main__":
             max_episodic_return = np.mean([rollout["episode"]["r"].max() for rollout in r])
             avg_episodic_length = np.mean([rollout["episode"]["l"].mean() for rollout in r])
             print(f"[test] episodic_return={max_episodic_return}")
-            writer.add_scalar("test/episodic_return_mean", avg_episodic_return, global_step)
-            writer.add_scalar("test/episodic_return_max", max_episodic_return, global_step)
-            writer.add_scalar("test/episodic_length", avg_episodic_length, global_step)
+            log_scalar("test/episodic_return_mean", avg_episodic_return, global_step)
+            log_scalar("test/episodic_return_max", max_episodic_return, global_step)
+            log_scalar("test/episodic_length", avg_episodic_length, global_step)
 
     envs.close()
     writer.close()
